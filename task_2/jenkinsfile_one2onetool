@@ -1,0 +1,116 @@
+pipeline {
+    agent any
+
+    triggers {
+        // Trigger on commits to the 'staging' or 'release' branches
+        // Github webhook must be configured on the pipeline
+        githubPush()
+    }
+
+    environment {
+        DATA_FILE = 'data/Questions.json' // Default to 'Questions.json' for release
+        DOCKER_IMAGE = 'one2onetool'
+        DOCKER_TAG = 'release'
+        ACR_NAME = 'onecv'
+        ACI_RESOURCE_GROUP = 'onecv'
+        ACI_CONTAINER_NAME = 'one2onetool-container'
+        ACI_REGION = 'southeastasia'
+        EMAIL_RECIPIENTS = 'samuel.lim92@gmail.com'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Checkout the branch that triggered the build
+                git url: 'https://github.com/fata1ityz/one2onetool.git'
+            }
+        }
+
+        stage('Set Data File for Branch') {
+            steps {
+                script {
+                    // Set DATA_FILE environment variable based on the branch
+                    // Set DOCKER_TAG based on the branch
+                    if (env.GIT_BRANCH == 'refs/heads/staging') {
+                        env.DATA_FILE = 'data/Questions-test.json'
+                        env.DOCKER_TAG = 'staging'
+                    } else if (env.GIT_BRANCH == 'refs/heads/release') {
+                        env.DATA_FILE = 'data/Questions.json'
+                        env.DOCKER_TAG = 'release'
+                    }
+                    echo "Using data file: ${env.DATA_FILE}"
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh 'npm install' // Install npm dependencies
+                sh 'npm test' // Run tests using Jest
+            }
+        }
+
+        stage('Build') {
+            steps {
+                // Build Docker image (ensure Docker is installed on Jenkins agent)
+                sh 'docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .'
+            }
+        }
+
+        stage('Login to Azure') {
+            steps {
+                script {
+                    // Login to Azure using Service Principal
+                    sh '''
+                    az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                    az account set --subscription $AZURE_SUBSCRIPTION_ID
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Image to ACR') {
+            steps {
+                script {
+                    // Login to ACR
+                    sh 'az acr login --name $ACR_NAME'
+                    // Tag Docker image with ACR repository URL
+                    sh 'docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${ACR_NAME}.azurecr.io/${DOCKER_IMAGE}:${DOCKER_TAG}'
+                    // Push image to ACR
+                    sh 'docker push ${ACR_NAME}.azurecr.io/${DOCKER_IMAGE}:${DOCKER_TAG}'
+                }
+            }
+        }      
+
+        stage('Deploy to ACI') {
+            steps {
+                script {
+                    // Deploy Docker image from ACR to Azure Container Instances (ACI)
+                    sh '''
+                    az container create \
+                        --resource-group $ACI_RESOURCE_GROUP \
+                        --name $ACI_CONTAINER_NAME \
+                        --image ${ACR_NAME}.azurecr.io/${DOCKER_IMAGE}:${DOCKER_TAG} \
+                        --cpu 2 --memory 2 \
+                        --location $ACI_REGION \
+                        --dns-name-label $ACI_CONTAINER_NAME
+                    '''
+                }
+            }
+        }
+
+    post {
+        success {
+            // Notify success
+            echo "Pipeline completed successfully."
+        } 
+        failure {
+            // Send email alert on build pipeline failure
+            mail(
+                to: "${EMAIL_RECIPIENTS}",
+                subject: "Pipeline Failed: ${currentBuild.fullDisplayName}",
+                body: "The pipeline failed at stage: ${currentBuild.currentResult}. Please check Jenkins build logs for more details."
+            )
+        }
+    }
+}
