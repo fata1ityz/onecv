@@ -1,0 +1,19 @@
+B. As time passes, the log files for your application have piled up, and the machine
+is running out of storage. Briefly describe how you would resolve this in a short
+paragraph, taking into considerations that:
+
+a. On rare occasion, logs up to 3 months old are required for troubleshooting
+/investigations
+
+b. Audit requirements dictate that logs are to be kept for at least 7 years
+
+c. The machine is currently storing 6 months worth of logs, and would run
+out of storage within the week. Increasing storage is not an option within
+the next 12 months
+
+Answer: To address the storage issue, I will implement a combination of log rotation and archiving. 
+First, I will configure logrotate to manage log files, ensuring that older logs are archived monthly. 
+For logs that are older than 1 month, I will compress them using tools like gzip or tar to reduce file sizes and optimize storage on the local machine. 
+Compressed logs that are older than 3 months will be moved to external storage solutions, such as an external log server or cloud-based storage like Azure Blob or AWS S3. 
+This approach will not only free up space on the local machine but also ensure compliance with audit requirements by securely storing logs for the long term. 
+Meanwhile, the most recent logs will remain accessible on the local machine for troubleshooting and operational needs.
